@@ -24,6 +24,7 @@ import {
 	umbExtensionsRegistry,
 	type UmbExtensionManifestKind,
 } from '@umbraco-cms/backoffice/extension-registry';
+import { filter, firstValueFrom } from '@umbraco-cms/backoffice/external/rxjs';
 import { redirectToStoredPath } from '@umbraco-cms/backoffice/utils';
 import { umbHttpClient } from '@umbraco-cms/backoffice/http-client';
 import { UmbViewContext } from '@umbraco-cms/backoffice/view';
@@ -265,7 +266,7 @@ export class UmbAppElement extends UmbLitElement {
 			this,
 			umbExtensionsRegistry,
 		).registerPublicExtensions();
-		new UmbAppEntryPointExtensionInitializer(this, umbExtensionsRegistry);
+		const entryPointInitializer = new UmbAppEntryPointExtensionInitializer(this, umbExtensionsRegistry);
 
 		// Try to initialise the auth flow and get the runtime status
 		try {
@@ -283,6 +284,26 @@ export class UmbAppElement extends UmbLitElement {
 
 			// The login screen needs the public extensions before routing.
 			await registerPublicExtensions;
+
+			// Wait for all app entry points to complete initialization so that any
+			// registry.exclude() calls in their onInit have run before the auth provider
+			// count check in makeAuthorizationRequest. Skip the wait when no entry points
+			// are registered (loaded never becomes true in that case).
+			const pendingEntryPoints = await firstValueFrom(umbExtensionsRegistry.byType('appEntryPoint'));
+			if (pendingEntryPoints.length > 0) {
+				// loadManifestPlainJs re-throws on network failure, which prevents loaded from ever
+				// becoming true. Race against a 30 s timer so a module load failure doesn't leave
+				// the user stuck on the loading spinner; the server-side single-provider redirect
+				// in BackOfficeLoginController is the fallback in that case.
+				const entryPointsLoaded = firstValueFrom(
+					entryPointInitializer.loaded.pipe(filter((loaded): loaded is boolean => loaded === true)),
+				);
+				await Promise.race([entryPointsLoaded, new Promise((resolve) => setTimeout(resolve, 30_000))]).catch(
+					() => {
+						// Module load failed; proceed to routing.
+					},
+				);
+			}
 
 			// Initialise the router
 			this.#redirect();

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using Umbraco.Cms.Api.Management.Security;
 using Umbraco.Cms.Core;
 using Umbraco.Cms.Core.Configuration.Models;
 using Umbraco.Cms.Core.Hosting;
@@ -17,18 +18,22 @@ public class BackOfficeLoginController : Controller
     public const string LoginPath = "/umbraco/login";
     private readonly IHostingEnvironment _hostingEnvironment;
     private readonly GlobalSettings _globalSettings;
+    private readonly IBackOfficeExternalLoginProviders _externalLoginProviders;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BackOfficeLoginController"/> class.
     /// </summary>
     /// <param name="globalSettings">A snapshot of the application's global settings options.</param>
     /// <param name="hostingEnvironment">The current hosting environment for the application.</param>
+    /// <param name="externalLoginProviders">The registered back office external login providers.</param>
     public BackOfficeLoginController(
         IOptionsSnapshot<GlobalSettings> globalSettings,
-        IHostingEnvironment hostingEnvironment)
+        IHostingEnvironment hostingEnvironment,
+        IBackOfficeExternalLoginProviders externalLoginProviders)
     {
         _hostingEnvironment = hostingEnvironment;
         _globalSettings = globalSettings.Value ?? throw new ArgumentNullException(nameof(globalSettings));
+        _externalLoginProviders = externalLoginProviders;
     }
 
     // GET
@@ -68,6 +73,16 @@ public class BackOfficeLoginController : Controller
         if ( Uri.TryCreate(model.ReturnUrl, UriKind.Relative, out _) is false) // Needs to test for relative and not absolute, as /whatever/ is an absolute path on linux
         {
             return BadRequest("ReturnUrl must be a relative path.");
+        }
+
+        BackOfficeExternaLoginProviderScheme[] providers =
+            (await _externalLoginProviders.GetBackOfficeProvidersAsync()).ToArray();
+
+        if (providers.Length == 1)
+        {
+            return Challenge(
+                new AuthenticationProperties { RedirectUri = model.ReturnUrl },
+                providers[0].AuthenticationScheme.Name);
         }
 
         return View("/umbraco/UmbracoLogin/Index.cshtml", model);

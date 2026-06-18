@@ -249,9 +249,13 @@ public static class ApplicationBuilderExtensions
     public static IApplicationBuilder UseUmbracoBackOfficeRewrites(this IApplicationBuilder builder)
     {
         IBackOfficePathGenerator backOfficePathGenerator = builder.ApplicationServices.GetRequiredService<IBackOfficePathGenerator>();
+        var backOfficePath = backOfficePathGenerator.BackOfficePath;
+        var backOfficePathSegment = backOfficePath.TrimStart('/');
         var backOfficeAssetsPath = backOfficePathGenerator.BackOfficeAssetsPath.TrimStart("/").EnsureEndsWith("/");
 
         builder.UseRewriter(new RewriteOptions()
+            // Rewrite trailing-slash backoffice root to the canonical path so the SPA route is matched
+            .AddRewrite(@"^" + backOfficePathSegment + @"/$", backOfficePath, skipRemainingRules: true)
             // The destination needs to be hardcoded to "/umbraco/backoffice" because this is where they are located in the Umbraco.Cms.StaticAssets RCL
             .AddRewrite(@"^" + backOfficeAssetsPath + "(.+)",  "/umbraco/backoffice/$1", true));
 
